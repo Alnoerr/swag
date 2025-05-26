@@ -9,15 +9,6 @@ const KEY_2: u8 = 0x03;
 const KEY_3: u8 = 0x04;
 const KEY_ESC: u8 = 0x01;
 
-// Simple delay function
-fn delay() {
-    for _ in 0..10_000_000 {
-        unsafe {
-            core::arch::asm!("nop");
-        }
-    }
-}
-
 // 5 second delay for panic
 fn long_delay() {
     for _ in 0..50_000_000 {
@@ -90,7 +81,7 @@ fn panic(_info: &PanicInfo) -> ! {
     let mut message_index = 0;
     
     // Animate the panic for dramatic effect
-    for frame in 0..20 {
+    for _ in 0..20 {
         clear_screen();
         
         // Flash different panic messages
