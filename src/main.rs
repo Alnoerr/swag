@@ -10,6 +10,7 @@ use core::task::{Context, Poll, Waker};
 const KEY_1: u8 = 0x02;
 const KEY_2: u8 = 0x03;
 const KEY_3: u8 = 0x04;
+const KEY_4: u8 = 0x05; // NEW!
 const KEY_ESC: u8 = 0x01;
 
 // === ASYNC RUNTIME ===
@@ -241,6 +242,18 @@ fn write_at(text: &[u8], row: usize, col: usize, color: u8) {
     }
 }
 
+// Write single character at position
+fn write_char_at(ch: u8, row: usize, col: usize, color: u8) {
+    if row < 25 && col < 80 {
+        let vga_buffer = 0xb8000 as *mut u8;
+        let offset = (row * 80 + col) * 2;
+        unsafe {
+            *vga_buffer.offset(offset as isize) = ch;
+            *vga_buffer.offset((offset + 1) as isize) = color;
+        }
+    }
+}
+
 // Read from keyboard port
 fn read_keyboard() -> Option<u8> {
     unsafe {
@@ -276,6 +289,34 @@ fn get_random_char() -> u8 {
 fn get_random_color() -> u8 {
     let colors = [0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x02, 0x03, 0x05, 0x06];
     colors[(random() % colors.len() as u32) as usize]
+}
+
+// === MATH HELPERS FOR HYPNOTIZER ===
+
+// Simple fixed-point sin approximation (scaled by 1000)
+fn sin_approx(angle: i32) -> i32 {
+    // Normalize angle to 0-360 range
+    let mut a = angle % 360;
+    if a < 0 { a += 360; }
+    
+    // Convert to radians-ish and use Taylor series approximation
+    // This is a very rough approximation but good enough for our hypnotic effects
+    let x = (a * 17) / 1000; // Rough conversion to "radians" * 1000
+    
+    // Taylor series: sin(x) ≈ x - x³/6 + x⁵/120
+    // Use smaller divisors to avoid overflow
+    let x3 = (x * x * x) / 6000; // Simplified to avoid overflow
+    let x5 = if x.abs() < 100 { // Only calculate x5 for small values
+        (x * x * x * x * x) / 120000
+    } else {
+        0 // Skip x5 term for large values to avoid overflow
+    };
+    
+    x - x3 + x5
+}
+
+fn cos_approx(angle: i32) -> i32 {
+    sin_approx(angle + 90)
 }
 
 // === PANIC HANDLER ===
@@ -437,6 +478,142 @@ async fn swag_matrix() {
     }
 }
 
+// NEW: SWAG HYPNOTIZER - The most mesmerizing thing ever!
+async fn swag_hypnotizer() {
+    let mut time = 0i32;
+    let center_row = 12;
+    let center_col = 40;
+    let swag_texts = [b"SWAG", b"EPIC", b"WOW!", b"MEGA"];
+    let mut text_index = 0;
+    
+    // Orbital positions for floating text
+    let mut orbit_angles = [0i32, 72, 144, 216, 288]; // 5 orbiting texts
+    let mut pulse_phase = 0i32;
+    
+    clear_screen();
+    
+    loop {
+        // Check for ESC key
+        if let Some(scan_code) = read_keyboard() {
+            if scan_code == KEY_ESC {
+                break;
+            }
+        }
+        
+        // Clear screen with fading effect (not full clear, just dim)
+        for row in 0..25 {
+            for col in 0..80 {
+                if random() % 8 == 0 { // Randomly fade some characters
+                    write_char_at(b' ', row, col, 0x00);
+                }
+            }
+        }
+        
+        // Draw concentric circles with pulsing colors
+        for radius in 1..=8 {
+            let pulse_offset = (pulse_phase + radius * 45) % 360;
+            let intensity = (sin_approx(pulse_offset) / 100) + 10;
+            let color_base = (0x08 + (intensity.abs() % 8) as u8) % 0x0f;
+            let color = if color_base == 0 { 0x08 } else { color_base };
+            
+            // Draw circle using character approximation
+            for angle in (0..360).step_by(15) {
+                let x = center_col as i32 + (cos_approx(angle + time) * radius / 1000);
+                let y = center_row as i32 + (sin_approx(angle + time) * radius / 2000); // Flatten for text mode
+                
+                if x >= 0 && x < 80 && y >= 0 && y < 25 {
+                    let chars = match radius % 4 {
+                        0 => b"*",
+                        1 => b"+",
+                        2 => b"o",
+                        _ => b".",
+                    };
+                    write_char_at(chars[0], y as usize, x as usize, color);
+                }
+            }
+        }
+        
+        // Draw orbiting SWAG texts
+        for (i, &angle) in orbit_angles.iter().enumerate() {
+            let orbit_radius = 6 + i; // Different orbit radiuses
+            let x = center_col as i32 + (cos_approx(angle) * orbit_radius as i32 / 1000);
+            let y = center_row as i32 + (sin_approx(angle) * orbit_radius as i32 / 2000);
+            
+            if x >= 2 && x < 76 && y >= 0 && y < 25 { // Leave room for text
+                let text = swag_texts[i % swag_texts.len()];
+                let color_cycle = (time / 10 + i as i32 * 50) % 360;
+                let color = 0x08 + ((sin_approx(color_cycle) / 100).abs() % 8) as u8;
+                let final_color = if color == 0 { 0x0f } else { color };
+                
+                write_at(text, y as usize, (x - text.len() as i32 / 2) as usize, final_color);
+            }
+        }
+        
+        // Central pulsing SWAG
+        let central_pulse = sin_approx(pulse_phase * 3);
+        let central_color = 0x08 + ((central_pulse / 100).abs() % 8) as u8;
+        let final_central_color = if central_color == 0 { 0x0f } else { central_color };
+        
+        // Make the central text bigger when pulsing
+        if central_pulse > 500 {
+            write_at(b"<<SWAG>>", center_row, center_col - 4, final_central_color);
+        } else {
+            write_at(b"SWAG", center_row, center_col - 2, final_central_color);
+        }
+        
+        // Hypnotic corner effects
+        let corner_phase = (time * 2) % 360;
+        let corner_char = match (sin_approx(corner_phase) / 300).abs() % 4 {
+            0 => b'\\',
+            1 => b'|',
+            2 => b'/',
+            _ => b'-',
+        };
+        let corner_color = get_random_color();
+        
+        write_char_at(corner_char, 0, 0, corner_color);
+        write_char_at(corner_char, 0, 79, corner_color);
+        write_char_at(corner_char, 24, 0, corner_color);
+        write_char_at(corner_char, 24, 79, corner_color);
+        
+        // Spiraling border effect
+        let border_offset = (time / 5) % 320; // 80*4 for perimeter
+        for i in 0..8 {
+            let pos = (border_offset + i * 40) % 320;
+            let (row, col) = if pos < 80 {
+                (0, pos) // Top
+            } else if pos < 160 {
+                (pos - 80, 79) // Right (adjust for screen height)
+            } else if pos < 240 {
+                (24, 239 - pos) // Bottom
+            } else {
+                (319 - pos, 0) // Left
+            };
+            
+            if row < 25 && col < 80 {
+                let spiral_color = 0x08 + ((i as u8 + time as u8 / 10) % 7);
+                write_char_at(b'#', row as usize, col as usize, spiral_color);
+            }
+        }
+        
+        // Update all the movement variables
+        time = (time + 8) % 3600; // Prevent overflow
+        pulse_phase = (pulse_phase + 12) % 360;
+        
+        for angle in &mut orbit_angles {
+            *angle = (*angle + 3) % 360; // Different speeds for hypnotic effect
+        }
+        
+        // Change central text occasionally
+        if time % 180 == 0 {
+            text_index = (text_index + 1) % swag_texts.len();
+        }
+        
+        delay(30_000).await; // Smooth 30fps-ish animation
+        yield_now().await;
+    }
+}
+
 // Background task that adds some flair
 async fn background_swag_enhancer() {
     let mut counter = 0;
@@ -465,6 +642,7 @@ fn show_menu() {
     let option1 = b"1) SWAG Generator";
     let option2 = b"2) Panic!!! (now with $wag)";
     let option3 = b"3) SWAG Matrix";
+    let option4 = b"4) SWAG Hypnotizer (truly mesmerizing)"; // NEW!
     let instruction = b"Press the number key... (ESC in apps to return)";
     let tech = b"Powered by: Cooperative Multitasking";
     
@@ -474,6 +652,7 @@ fn show_menu() {
     write_at(option1, 14, 32, 0x0a);
     write_at(option2, 15, 32, 0x0c);
     write_at(option3, 16, 32, 0x0b);
+    write_at(option4, 17, 32, 0x0d); // NEW!
     write_at(instruction, 20, 20, 0x08);
     write_at(tech, 22, 22, 0x0d);
 }
@@ -523,6 +702,26 @@ pub extern "C" fn _start() -> ! {
                         executor.spawn(swag_matrix());
                         
                         // Run executor until matrix completes
+                        loop {
+                            executor.run_step();
+                            let mut has_main_task = false;
+                            for i in 1..executor.tasks.len() { // Skip slot 0 (background task)
+                                if executor.tasks[i].is_active() {
+                                    has_main_task = true;
+                                    break;
+                                }
+                            }
+                            if !has_main_task {
+                                break;
+                            }
+                        }
+                        waiting_for_input = false;
+                    }
+                    KEY_4 => { // NEW HYPNOTIZER OPTION!
+                        clear_screen();
+                        executor.spawn(swag_hypnotizer());
+                        
+                        // Run executor until hypnotizer completes
                         loop {
                             executor.run_step();
                             let mut has_main_task = false;
