@@ -291,35 +291,6 @@ fn get_random_color() -> u8 {
     colors[(random() % colors.len() as u32) as usize]
 }
 
-// === MATH HELPERS FOR HYPNOTIZER ===
-
-// Improved fixed-point sin approximation (scaled by 1000)
-fn sin_approx(angle: i32) -> i32 {
-    // Normalize angle to 0-360 range
-    let mut a = angle % 360;
-    if a < 0 { a += 360; }
-    
-    // Convert to radians (scaled by 1000)
-    let x = (a * 17) / 1000;
-    
-    // Better Taylor series approximation with more terms
-    // sin(x) ≈ x - x³/6 + x⁵/120 - x⁷/5040
-    let x2 = (x * x) / 1000;
-    let x3 = (x2 * x) / 6000;
-    let x5 = if x.abs() < 100 {
-        (x3 * x2) / 20000
-    } else {
-        0
-    };
-    let x7 = if x.abs() < 50 {
-        (x5 * x2) / 42000
-    } else {
-        0
-    };
-    
-    x - x3 + x5 - x7
-}
-
 // === PANIC HANDLER ===
 
 #[panic_handler]
@@ -488,7 +459,6 @@ async fn swag_hypnotizer() {
     let mut vel_y = 1i32;
     let swag_texts = [b"SWAG", b"EPIC", b"WOW!", b"MEGA"];
     let mut text_index = 0;
-    let mut pulse_phase = 0i32;
     
     // Rainbow colors (VGA colors)
     let rainbow_colors = [
@@ -564,9 +534,8 @@ async fn swag_hypnotizer() {
             }
         }
         
-        // Draw corner effects with rainbow colors
-        let corner_phase = (time * 2) % 360;
-        let corner_char = match (sin_approx(corner_phase) / 300).abs() % 4 {
+        // Draw corner effects with rainbow colors - simplified!
+        let corner_char = match (time / 10) % 4 {
             0 => b'\\',
             1 => b'|',
             2 => b'/',
@@ -581,7 +550,6 @@ async fn swag_hypnotizer() {
         
         // Update time and phase
         time = (time + 1) % 3600;
-        pulse_phase = (pulse_phase + 12) % 360;
         
         delay(80_000).await; // Adjusted for better movement speed
         yield_now().await;
