@@ -293,30 +293,31 @@ fn get_random_color() -> u8 {
 
 // === MATH HELPERS FOR HYPNOTIZER ===
 
-// Simple fixed-point sin approximation (scaled by 1000)
+// Improved fixed-point sin approximation (scaled by 1000)
 fn sin_approx(angle: i32) -> i32 {
     // Normalize angle to 0-360 range
     let mut a = angle % 360;
     if a < 0 { a += 360; }
     
-    // Convert to radians-ish and use Taylor series approximation
-    // This is a very rough approximation but good enough for our hypnotic effects
-    let x = (a * 17) / 1000; // Rough conversion to "radians" * 1000
+    // Convert to radians (scaled by 1000)
+    let x = (a * 17) / 1000;
     
-    // Taylor series: sin(x) ≈ x - x³/6 + x⁵/120
-    // Use smaller divisors to avoid overflow
-    let x3 = (x * x * x) / 6000; // Simplified to avoid overflow
-    let x5 = if x.abs() < 100 { // Only calculate x5 for small values
-        (x * x * x * x * x) / 120000
+    // Better Taylor series approximation with more terms
+    // sin(x) ≈ x - x³/6 + x⁵/120 - x⁷/5040
+    let x2 = (x * x) / 1000;
+    let x3 = (x2 * x) / 6000;
+    let x5 = if x.abs() < 100 {
+        (x3 * x2) / 20000
     } else {
-        0 // Skip x5 term for large values to avoid overflow
+        0
+    };
+    let x7 = if x.abs() < 50 {
+        (x5 * x2) / 42000
+    } else {
+        0
     };
     
-    x - x3 + x5
-}
-
-fn cos_approx(angle: i32) -> i32 {
-    sin_approx(angle + 90)
+    x - x3 + x5 - x7
 }
 
 // === PANIC HANDLER ===
@@ -481,14 +482,23 @@ async fn swag_matrix() {
 // NEW: SWAG HYPNOTIZER - The most mesmerizing thing ever!
 async fn swag_hypnotizer() {
     let mut time = 0i32;
-    let center_row = 12;
-    let center_col = 40;
+    let mut pos_x = 40i32; // Starting position
+    let mut pos_y = 12i32;
+    let mut vel_x = 2i32;  // Increased velocity for better bouncing
+    let mut vel_y = 1i32;
     let swag_texts = [b"SWAG", b"EPIC", b"WOW!", b"MEGA"];
     let mut text_index = 0;
-    
-    // Orbital positions for floating text
-    let mut orbit_angles = [0i32, 72, 144, 216, 288]; // 5 orbiting texts
     let mut pulse_phase = 0i32;
+    
+    // Rainbow colors (VGA colors)
+    let rainbow_colors = [
+        0x0c, // Light Red
+        0x0e, // Yellow
+        0x0a, // Light Green
+        0x0b, // Light Cyan
+        0x09, // Light Blue
+        0x0d, // Light Magenta
+    ];
     
     clear_screen();
     
@@ -500,68 +510,61 @@ async fn swag_hypnotizer() {
             }
         }
         
-        // Clear screen with fading effect (not full clear, just dim)
+        // Clear screen with fading effect
         for row in 0..25 {
             for col in 0..80 {
-                if random() % 8 == 0 { // Randomly fade some characters
+                if random() % 8 == 0 {
                     write_char_at(b' ', row, col, 0x00);
                 }
             }
         }
         
-        // Draw concentric circles with pulsing colors
-        for radius in 1..=8 {
-            let pulse_offset = (pulse_phase + radius * 45) % 360;
-            let intensity = (sin_approx(pulse_offset) / 100) + 10;
-            let color_base = (0x08 + (intensity.abs() % 8) as u8) % 0x0f;
-            let color = if color_base == 0 { 0x08 } else { color_base };
-            
-            // Draw circle using character approximation
-            for angle in (0..360).step_by(15) {
-                let x = center_col as i32 + (cos_approx(angle + time) * radius / 1000);
-                let y = center_row as i32 + (sin_approx(angle + time) * radius / 2000); // Flatten for text mode
-                
-                if x >= 0 && x < 80 && y >= 0 && y < 25 {
-                    let chars = match radius % 4 {
-                        0 => b"*",
-                        1 => b"+",
-                        2 => b"o",
-                        _ => b".",
-                    };
-                    write_char_at(chars[0], y as usize, x as usize, color);
-                }
+        // Update position - ensure proper bouncing
+        pos_x += vel_x;
+        pos_y += vel_y;
+        
+        // Bounce off edges with proper boundary checking
+        if pos_x <= 0 {
+            vel_x = vel_x.abs(); // Ensure positive velocity
+            pos_x = 0;
+            text_index = (text_index + 1) % swag_texts.len();
+        } else if pos_x >= 76 {
+            vel_x = -vel_x.abs(); // Ensure negative velocity
+            pos_x = 76;
+            text_index = (text_index + 1) % swag_texts.len();
+        }
+        
+        if pos_y <= 0 {
+            vel_y = vel_y.abs(); // Ensure positive velocity
+            pos_y = 0;
+            text_index = (text_index + 1) % swag_texts.len();
+        } else if pos_y >= 24 {
+            vel_y = -vel_y.abs(); // Ensure negative velocity
+            pos_y = 24;
+            text_index = (text_index + 1) % swag_texts.len();
+        }
+        
+        // Draw the bouncing text with rainbow effects
+        let text = swag_texts[text_index];
+        let color_index = ((time / 10) % rainbow_colors.len() as i32) as usize;
+        let base_color = rainbow_colors[color_index];
+        
+        // Draw main text
+        write_at(text, pos_y as usize, pos_x as usize, base_color);
+        
+        // Add a rainbow trail effect
+        for i in 0..5 { // Longer trail
+            let trail_x = pos_x - (vel_x * i);
+            let trail_y = pos_y - (vel_y * i);
+            if trail_x >= 0 && trail_x < 76 && trail_y >= 0 && trail_y < 25 {
+                // Each trail segment gets a different rainbow color
+                let trail_color_index = ((color_index as i32 + i as i32) % rainbow_colors.len() as i32) as usize;
+                let trail_color = rainbow_colors[trail_color_index];
+                write_at(text, trail_y as usize, trail_x as usize, trail_color);
             }
         }
         
-        // Draw orbiting SWAG texts
-        for (i, &angle) in orbit_angles.iter().enumerate() {
-            let orbit_radius = 6 + i; // Different orbit radiuses
-            let x = center_col as i32 + (cos_approx(angle) * orbit_radius as i32 / 1000);
-            let y = center_row as i32 + (sin_approx(angle) * orbit_radius as i32 / 2000);
-            
-            if x >= 2 && x < 76 && y >= 0 && y < 25 { // Leave room for text
-                let text = swag_texts[i % swag_texts.len()];
-                let color_cycle = (time / 10 + i as i32 * 50) % 360;
-                let color = 0x08 + ((sin_approx(color_cycle) / 100).abs() % 8) as u8;
-                let final_color = if color == 0 { 0x0f } else { color };
-                
-                write_at(text, y as usize, (x - text.len() as i32 / 2) as usize, final_color);
-            }
-        }
-        
-        // Central pulsing SWAG
-        let central_pulse = sin_approx(pulse_phase * 3);
-        let central_color = 0x08 + ((central_pulse / 100).abs() % 8) as u8;
-        let final_central_color = if central_color == 0 { 0x0f } else { central_color };
-        
-        // Make the central text bigger when pulsing
-        if central_pulse > 500 {
-            write_at(b"<<SWAG>>", center_row, center_col - 4, final_central_color);
-        } else {
-            write_at(b"SWAG", center_row, center_col - 2, final_central_color);
-        }
-        
-        // Hypnotic corner effects
+        // Draw corner effects with rainbow colors
         let corner_phase = (time * 2) % 360;
         let corner_char = match (sin_approx(corner_phase) / 300).abs() % 4 {
             0 => b'\\',
@@ -569,47 +572,18 @@ async fn swag_hypnotizer() {
             2 => b'/',
             _ => b'-',
         };
-        let corner_color = get_random_color();
+        let corner_color = rainbow_colors[(time / 15) as usize % rainbow_colors.len()];
         
         write_char_at(corner_char, 0, 0, corner_color);
         write_char_at(corner_char, 0, 79, corner_color);
         write_char_at(corner_char, 24, 0, corner_color);
         write_char_at(corner_char, 24, 79, corner_color);
         
-        // Spiraling border effect
-        let border_offset = (time / 5) % 320; // 80*4 for perimeter
-        for i in 0..8 {
-            let pos = (border_offset + i * 40) % 320;
-            let (row, col) = if pos < 80 {
-                (0, pos) // Top
-            } else if pos < 160 {
-                (pos - 80, 79) // Right (adjust for screen height)
-            } else if pos < 240 {
-                (24, 239 - pos) // Bottom
-            } else {
-                (319 - pos, 0) // Left
-            };
-            
-            if row < 25 && col < 80 {
-                let spiral_color = 0x08 + ((i as u8 + time as u8 / 10) % 7);
-                write_char_at(b'#', row as usize, col as usize, spiral_color);
-            }
-        }
-        
-        // Update all the movement variables
-        time = (time + 8) % 3600; // Prevent overflow
+        // Update time and phase
+        time = (time + 1) % 3600;
         pulse_phase = (pulse_phase + 12) % 360;
         
-        for angle in &mut orbit_angles {
-            *angle = (*angle + 3) % 360; // Different speeds for hypnotic effect
-        }
-        
-        // Change central text occasionally
-        if time % 180 == 0 {
-            text_index = (text_index + 1) % swag_texts.len();
-        }
-        
-        delay(30_000).await; // Smooth 30fps-ish animation
+        delay(80_000).await; // Adjusted for better movement speed
         yield_now().await;
     }
 }
